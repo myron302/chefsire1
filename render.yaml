@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: chefsire-web
+    rootDir: web
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    env:
+      - key: NODE_VERSION
+        value: 18
