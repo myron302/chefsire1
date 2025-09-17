@@ -1,12 +1,10 @@
-// ChefSire homepage content goes here
-
-import React from 'react';
+// Updated homepage component code here
 
 const Home = () => {
   return (
     <div>
       <h1>Welcome to ChefSire</h1>
-      <p>Your one-stop solution for all culinary needs!</p>
+      // Other homepage content
     </div>
   );
 };
