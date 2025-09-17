@@ -29,8 +29,6 @@ app.get("/api/health", (_req: Request, res: Response) => {
 // -------------------------
 
 // GET /api/recipes/search
-// - If q empty: show local DB first; if none, show MealDB defaults so rollout isn't empty
-// - If q provided: search MealDB (includes strMealThumb images)
 const searchQueryZ = z.object({
   q: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(24),
@@ -76,7 +74,7 @@ app.get("/api/recipes/search", async (req: Request, res: Response) => {
       source: "mealdb" as const,
       sourceId: m.sourceId,
       title: m.title,
-      imageUrl: m.imageUrl ?? null, // ✅ strMealThumb
+      imageUrl: m.imageUrl ?? null,
       category: m.category ?? null,
       cuisine: m.cuisine ?? null,
       tags: m.tags ?? null,
@@ -84,13 +82,13 @@ app.get("/api/recipes/search", async (req: Request, res: Response) => {
     res.json({ items, total, limit, offset });
   } catch (err: any) {
     console.error("GET /api/recipes/search error:", err);
-    res.status(500).json({ error: "Search failed", detail: err?.message ?? String(err) });
+    res
+      .status(500)
+      .json({ error: "Search failed", detail: err?.message ?? String(err) });
   }
 });
 
 // POST /api/recipes/fetch
-// Body: { idMeal: string } OR { name: string }
-// Imports a recipe into your DB (no postId required)
 const fetchBodyZ = z.union([
   z.object({ idMeal: z.string().min(1) }),
   z.object({ name: z.string().min(1) }),
@@ -105,7 +103,8 @@ app.post("/api/recipes/fetch", async (req: Request, res: Response) => {
         ? await lookupMealById(body.idMeal)
         : (await searchMealsByName(body.name)).at(0) ?? null;
 
-    if (!normalized) return res.status(404).json({ error: "Recipe not found in TheMealDB" });
+    if (!normalized)
+      return res.status(404).json({ error: "Recipe not found in TheMealDB" });
 
     const saved = await storage.upsertMealDbRecipe({
       sourceId: normalized.sourceId,
@@ -124,12 +123,13 @@ app.post("/api/recipes/fetch", async (req: Request, res: Response) => {
     res.json(saved);
   } catch (err: any) {
     console.error("POST /api/recipes/fetch error:", err);
-    res.status(400).json({ error: "Import failed", detail: err?.message ?? String(err) });
+    res
+      .status(400)
+      .json({ error: "Import failed", detail: err?.message ?? String(err) });
   }
 });
 
 // GET /api/recipes/:id
-// Return a single local DB recipe by id
 app.get("/api/recipes/:id", async (req: Request, res: Response) => {
   try {
     const id = String(req.params.id);
@@ -138,9 +138,59 @@ app.get("/api/recipes/:id", async (req: Request, res: Response) => {
     res.json(row);
   } catch (err: any) {
     console.error("GET /api/recipes/:id error:", err);
-    res.status(500).json({ error: "Failed to fetch recipe", detail: err?.message ?? String(err) });
+    res.status(500).json({
+      error: "Failed to fetch recipe",
+      detail: err?.message ?? String(err),
+    });
   }
 });
+
+// -------------------------
+// Ingredient substitutions
+// -------------------------
+app.get(
+  "/api/ingredients/:ingredient/substitutions",
+  async (req: Request, res: Response) => {
+    try {
+      const ingredient = String(req.params.ingredient || "").trim();
+      if (!ingredient)
+        return res.status(400).json({ error: "Ingredient is required" });
+
+      const suggestions = [
+        {
+          substitute: "Margarine",
+          reason: "Similar fat content and texture",
+          ratio: "1:1",
+          impact: "Slight flavor change",
+        },
+        {
+          substitute: "Coconut oil",
+          reason: "Solid fat; melts like butter",
+          ratio: "1:1",
+          impact: "Adds coconut aroma",
+        },
+        {
+          substitute: "Olive oil",
+          reason: "Good for sautéing and baking",
+          ratio: "3/4 cup per 1 cup butter",
+          impact: "Less rich; no dairy solids",
+        },
+      ];
+
+      res.json({
+        ingredient,
+        suggestions,
+        note: "Placeholder. We can wire OpenAI later for smarter results.",
+      });
+    } catch (err: any) {
+      console.error("subs error", err);
+      res.status(500).json({
+        error: "Substitution lookup failed",
+        detail: err?.message,
+      });
+    }
+  }
+);
 
 // -------------------------
 // Catch-all: send React index.html
