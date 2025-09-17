@@ -1,12 +1,12 @@
 import React from 'react';
-import ReactDOM from 'react-dom/client';
+import ReactDOM from 'react-dom';
 
-const root = ReactDOM.createRoot(document.getElementById('root'));
-root.render(
+ReactDOM.render(
   <React.StrictMode>
     <div>
       <h1>Welcome to Chefsire Web!</h1>
       <p>Your React app is running successfully.</p>
     </div>
-  </React.StrictMode>
+  </React.StrictMode>,
+  document.getElementById('root')
 );
