@@ -29,7 +29,7 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const db = drizzle(pool);
 
 export class Storage {
-  // Users
+  // ---------------- USERS ----------------
   async getUser(id: string): Promise<User | undefined> {
     const result = await db.select().from(users).where(eq(users.id, id)).limit(1);
     return result[0];
@@ -61,7 +61,7 @@ export class Storage {
       .limit(limit);
   }
 
-  // Posts
+  // ---------------- POSTS ----------------
   async getPost(id: string): Promise<Post | undefined> {
     const result = await db.select().from(posts).where(eq(posts.id, id)).limit(1);
     return result[0];
@@ -139,7 +139,7 @@ export class Storage {
     }));
   }
 
-  // Recipes
+  // ---------------- RECIPES ----------------
   async getRecipe(id: string): Promise<Recipe | undefined> {
     const result = await db.select().from(recipes).where(eq(recipes.id, id)).limit(1);
     return result[0];
@@ -180,7 +180,78 @@ export class Storage {
     return dbQuery.orderBy(desc(recipes.createdAt)).limit(limit).offset(offset);
   }
 
-  // Likes
+  /** 🔹 Find a recipe by external source (e.g., TheMealDB) */
+  async getRecipeBySourceId(source: string, sourceId: string) {
+    const result = await db
+      .select()
+      .from(recipes)
+      .where(sql`${recipes.source} = ${source} AND ${recipes.sourceId} = ${sourceId}`)
+      .limit(1);
+    return result[0];
+  }
+
+  /** 🔹 Upsert a MealDB recipe (dedupes by source+sourceId) */
+  async upsertMealDbRecipe(n: {
+    sourceId: string;
+    title: string;
+    imageUrl?: string | null;
+    instructionsSteps: string[];
+    ingredients: { name: string; measure: string | null }[];
+    cuisine?: string | null;
+    category?: string | null;
+    tags?: string[] | null;
+    youtubeUrl?: string | null;
+    sourceUrl?: string | null;
+    searchText: string;
+    postId?: string | null;
+  }) {
+    const existing = await this.getRecipeBySourceId("mealdb", n.sourceId);
+
+    if (existing) {
+      const [updated] = await db
+        .update(recipes)
+        .set({
+          title: n.title,
+          imageUrl: n.imageUrl ?? existing.imageUrl,
+          instructions: n.instructionsSteps,
+          ingredients: n.ingredients,
+          cuisine: n.cuisine ?? existing.cuisine,
+          category: n.category ?? existing.category,
+          tags: n.tags ?? existing.tags,
+          youtubeUrl: n.youtubeUrl ?? existing.youtubeUrl,
+          sourceUrl: n.sourceUrl ?? existing.sourceUrl,
+          searchText: n.searchText ?? existing.searchText,
+          updatedAt: sql`NOW()`,
+        })
+        .where(sql`${recipes.source} = 'mealdb' AND ${recipes.sourceId} = ${n.sourceId}`)
+        .returning();
+      return updated;
+    }
+
+    const [inserted] = await db
+      .insert(recipes)
+      .values({
+        id: crypto.randomUUID(),
+        postId: n.postId ?? null,
+        source: "mealdb",
+        sourceId: n.sourceId,
+        title: n.title,
+        imageUrl: n.imageUrl ?? null,
+        instructions: n.instructionsSteps,
+        ingredients: n.ingredients,
+        cuisine: n.cuisine ?? null,
+        category: n.category ?? null,
+        tags: n.tags ?? null,
+        youtubeUrl: n.youtubeUrl ?? null,
+        sourceUrl: n.sourceUrl ?? null,
+        searchText: n.searchText,
+      })
+      .returning();
+
+    return inserted;
+  }
+
+  // ---------------- LIKES ----------------
   async likePost(userId: string, postId: string): Promise<Like> {
     const result = await db.insert(likes).values({ 
       id: crypto.randomUUID(),
@@ -209,7 +280,7 @@ export class Storage {
     return false;
   }
 
-  // Comments
+  // ---------------- COMMENTS ----------------
   async createComment(insertComment: InsertComment): Promise<Comment> {
     const result = await db.insert(comments).values(insertComment).returning();
     
@@ -233,7 +304,7 @@ export class Storage {
     return result.map(row => ({ ...row.comment, user: row.user }));
   }
 
-  // Follows
+  // ---------------- FOLLOWS ----------------
   async followUser(followerId: string, followingId: string): Promise<Follow> {
     const result = await db.insert(follows).values({ 
       id: crypto.randomUUID(),
@@ -261,4 +332,5 @@ export class Storage {
   }
 }
 
+// ✅ this line must remain at the very end
 export const storage = new Storage();
