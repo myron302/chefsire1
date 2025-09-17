@@ -1,4 +1,6 @@
 // server/index.ts
+import OpenAI from "openai";
+const openai = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
 import express, { type Request, type Response } from "express";
 import path from "path";
 import { fileURLToPath } from "url";
