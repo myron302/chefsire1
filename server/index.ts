@@ -1,14 +1,17 @@
 // server/index.ts
 import OpenAI from "openai";
-const openai = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
+const openai = process.env.OPENAI_API_KEY
+  ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+  : null;
+
 import express, { type Request, type Response } from "express";
 import path from "path";
 import { fileURLToPath } from "url";
 import { z } from "zod";
 
-// Local modules
-import { storage } from "./storage.js";
-import { searchMealsByName, lookupMealById } from "./recipes-service.js";
+// Local modules (extensionless so esbuild resolves .ts)
+import { storage } from "./storage";
+import { searchMealsByName, lookupMealById } from "./recipes-service";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -76,7 +79,7 @@ app.get("/api/recipes/search", async (req: Request, res: Response) => {
       source: "mealdb" as const,
       sourceId: m.sourceId,
       title: m.title,
-      imageUrl: m.imageUrl ?? null,
+      imageUrl: m.imageUrl ?? null, // ✅ strMealThumb
       category: m.category ?? null,
       cuisine: m.cuisine ?? null,
       tags: m.tags ?? null,
@@ -84,9 +87,7 @@ app.get("/api/recipes/search", async (req: Request, res: Response) => {
     res.json({ items, total, limit, offset });
   } catch (err: any) {
     console.error("GET /api/recipes/search error:", err);
-    res
-      .status(500)
-      .json({ error: "Search failed", detail: err?.message ?? String(err) });
+    res.status(500).json({ error: "Search failed", detail: err?.message ?? String(err) });
   }
 });
 
@@ -105,8 +106,7 @@ app.post("/api/recipes/fetch", async (req: Request, res: Response) => {
         ? await lookupMealById(body.idMeal)
         : (await searchMealsByName(body.name)).at(0) ?? null;
 
-    if (!normalized)
-      return res.status(404).json({ error: "Recipe not found in TheMealDB" });
+    if (!normalized) return res.status(404).json({ error: "Recipe not found in TheMealDB" });
 
     const saved = await storage.upsertMealDbRecipe({
       sourceId: normalized.sourceId,
@@ -125,9 +125,7 @@ app.post("/api/recipes/fetch", async (req: Request, res: Response) => {
     res.json(saved);
   } catch (err: any) {
     console.error("POST /api/recipes/fetch error:", err);
-    res
-      .status(400)
-      .json({ error: "Import failed", detail: err?.message ?? String(err) });
+    res.status(400).json({ error: "Import failed", detail: err?.message ?? String(err) });
   }
 });
 
@@ -140,55 +138,71 @@ app.get("/api/recipes/:id", async (req: Request, res: Response) => {
     res.json(row);
   } catch (err: any) {
     console.error("GET /api/recipes/:id error:", err);
-    res.status(500).json({
-      error: "Failed to fetch recipe",
-      detail: err?.message ?? String(err),
-    });
+    res.status(500).json({ error: "Failed to fetch recipe", detail: err?.message ?? String(err) });
   }
 });
 
 // -------------------------
-// Ingredient substitutions
+// Ingredient substitutions (AI-powered with fallback)
 // -------------------------
 app.get(
   "/api/ingredients/:ingredient/substitutions",
   async (req: Request, res: Response) => {
     try {
       const ingredient = String(req.params.ingredient || "").trim();
-      if (!ingredient)
-        return res.status(400).json({ error: "Ingredient is required" });
+      if (!ingredient) return res.status(400).json({ error: "Ingredient is required" });
 
-      const suggestions = [
-        {
-          substitute: "Margarine",
-          reason: "Similar fat content and texture",
-          ratio: "1:1",
-          impact: "Slight flavor change",
-        },
-        {
-          substitute: "Coconut oil",
-          reason: "Solid fat; melts like butter",
-          ratio: "1:1",
-          impact: "Adds coconut aroma",
-        },
-        {
-          substitute: "Olive oil",
-          reason: "Good for sautéing and baking",
-          ratio: "3/4 cup per 1 cup butter",
-          impact: "Less rich; no dairy solids",
-        },
-      ];
+      // Fallback if no key present
+      if (!openai) {
+        return res.json({
+          ingredient,
+          suggestions: [
+            { substitute: "Margarine", reason: "Similar fat content and texture", ratio: "1:1", impact: "Slight flavor change" },
+            { substitute: "Coconut oil", reason: "Solid fat; melts like butter", ratio: "1:1", impact: "Adds coconut aroma" },
+            { substitute: "Olive oil", reason: "Good for sautéing and baking", ratio: "3/4 cup per 1 cup butter", impact: "Less rich; no dairy solids" },
+          ],
+          note: "Set OPENAI_API_KEY to enable AI-generated suggestions.",
+        });
+      }
 
-      res.json({
-        ingredient,
-        suggestions,
-        note: "Placeholder. We can wire OpenAI later for smarter results.",
+      const system = `Return concise cooking substitution suggestions as strict JSON only.
+Each suggestion must include: substitute, reason (<=1 sentence), ratio (e.g. "1:1"), impact (<=1 sentence).
+Provide 4–6 options spanning budget, dietary, availability. No prose outside JSON.`;
+
+      const prompt = `Ingredient: ${ingredient}`;
+
+      const resp = await openai.responses.create({
+        model: "gpt-4.1-mini",
+        temperature: 0.3,
+        input: [
+          { role: "system", content: system },
+          { role: "user", content: prompt },
+          { role: "user", content: `Respond ONLY with JSON: {"ingredient":"${ingredient}","suggestions":[{"substitute":"...","reason":"...","ratio":"...","impact":"..."}]}` },
+        ],
       });
+
+      const text = resp.output_text ?? "";
+      let payload: any;
+      try {
+        payload = JSON.parse(text);
+      } catch {
+        const m = text.match(/\{[\s\S]*\}$/);
+        payload = m ? JSON.parse(m[0]) : null;
+      }
+      if (!payload?.ingredient || !Array.isArray(payload?.suggestions)) {
+        throw new Error("AI JSON missing required fields");
+      }
+
+      res.json(payload);
     } catch (err: any) {
       console.error("subs error", err);
-      res.status(500).json({
-        error: "Substitution lookup failed",
-        detail: err?.message,
+      res.status(200).json({
+        ingredient: String(req.params.ingredient || "").trim(),
+        suggestions: [
+          { substitute: "Greek yogurt", reason: "Creamy tang in sauces/bakes", ratio: "1:1", impact: "Tangier flavor, higher protein" },
+          { substitute: "Silken tofu (blended)", reason: "Neutral creamy base, dairy-free", ratio: "1:1", impact: "Less rich; season more" },
+        ],
+        note: "AI response failed to parse; showing a safe fallback.",
       });
     }
   }
