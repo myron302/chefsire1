@@ -1,5 +1,4 @@
 // server/storage.ts
-import { randomUUID } from "node:crypto";
 import { drizzle } from "drizzle-orm/neon-serverless";
 import { Pool } from "@neondatabase/serverless";
 import { eq, desc, and, sql, asc } from "drizzle-orm";
@@ -24,7 +23,7 @@ import {
   type InsertFollow,
   type PostWithUser,
   type CommentWithUser,
-} from "../shared/schema"; // ← fixed path (no .js)
+} from "../shared/schema"; // ✅ fixed path
 
 // Create database connection
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -178,7 +177,9 @@ export class Storage {
 
     if (query) {
       dbQuery = dbQuery.where(
-        sql`${recipes.title} ILIKE ${"%" + query + "%"} OR ${recipes.ingredients}::text ILIKE ${"%" + query + "%"}`
+        sql`${recipes.title} ILIKE ${"%" + query + "%"} OR ${recipes.ingredients}::text ILIKE ${
+          "%" + query + "%"
+        }`
       );
     }
 
@@ -236,7 +237,7 @@ export class Storage {
     const [inserted] = await db
       .insert(recipes)
       .values({
-        id: randomUUID(),
+        id: crypto.randomUUID(),
         postId: n.postId ?? null,
         source: "mealdb",
         sourceId: n.sourceId,
@@ -261,7 +262,7 @@ export class Storage {
     const result = await db
       .insert(likes)
       .values({
-        id: randomUUID(),
+        id: crypto.randomUUID(),
         userId,
         postId,
       })
@@ -276,7 +277,10 @@ export class Storage {
   }
 
   async unlikePost(userId: string, postId: string): Promise<boolean> {
-    const result = await db.delete(likes).where(and(eq(likes.userId, userId), eq(likes.postId, postId))).returning();
+    const result = await db
+      .delete(likes)
+      .where(and(eq(likes.userId, userId), eq(likes.postId, postId)))
+      .returning();
 
     if (result[0]) {
       await db
@@ -319,14 +323,20 @@ export class Storage {
     const result = await db
       .insert(follows)
       .values({
-        id: randomUUID(),
+        id: crypto.randomUUID(),
         followerId,
         followingId,
       })
       .returning();
 
-    await db.update(users).set({ followingCount: sql`${users.followingCount} + 1` }).where(eq(users.id, followerId));
-    await db.update(users).set({ followersCount: sql`${users.followersCount} + 1` }).where(eq(users.id, followingId));
+    await db
+      .update(users)
+      .set({ followingCount: sql`${users.followingCount} + 1` })
+      .where(eq(users.id, followerId));
+    await db
+      .update(users)
+      .set({ followersCount: sql`${users.followersCount} + 1` })
+      .where(eq(users.id, followingId));
 
     return result[0];
   }
@@ -338,13 +348,19 @@ export class Storage {
       .returning();
 
     if (result[0]) {
-      await db.update(users).set({ followingCount: sql`${users.followingCount} - 1` }).where(eq(users.id, followerId));
-      await db.update(users).set({ followersCount: sql`${users.followersCount} - 1` }).where(eq(users.id, followingId));
+      await db
+        .update(users)
+        .set({ followingCount: sql`${users.followingCount} - 1` })
+        .where(eq(users.id, followerId));
+      await db
+        .update(users)
+        .set({ followersCount: sql`${users.followersCount} - 1` })
+        .where(eq(users.id, followingId));
       return true;
     }
     return false;
   }
 }
 
-// ✅ this line must remain at the very end
+// ✅ must remain at end
 export const storage = new Storage();
