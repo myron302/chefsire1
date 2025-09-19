@@ -18,35 +18,44 @@ app.get("/api/health", (_req, res) => {
 app.use("/api", apiRouter);
 
 // ---------------- Frontend static serving ----------------
-// Find the built frontend directory (must contain index.html)
+function isBuiltDir(p: string) {
+  const indexHtml = path.join(p, "index.html");
+  const assetsDir = path.join(p, "assets");
+  return fs.existsSync(indexHtml) && fs.existsSync(assetsDir);
+}
+
+// Common build locations:
+// - When bundled: __dirname (dist/)
+// - Root build:  ../dist
+// - Monorepo:    ../client/dist
 const candidates = [
-  // Case 1: server is bundled into dist alongside client build
   path.join(__dirname),
-  // Case 2: running server directly from /server, client built to ../dist
   path.join(__dirname, "../dist"),
-  // Case 3: monorepo with client build at client/dist
   path.join(__dirname, "../client/dist"),
 ];
 
-const staticDir = candidates.find((p) =>
-  fs.existsSync(path.join(p, "index.html"))
-);
+const staticDir = candidates.find(isBuiltDir);
 
 if (staticDir) {
-  // Serve static frontend
   app.use(express.static(staticDir));
 
-  // SPA fallback → always serve index.html
-  app.get("*", (_req, res) => {
-    res.sendFile(path.join(staticDir, "index.html"));
+  // SPA fallback ONLY for real page navigations (not assets or API)
+  app.get("*", (req, res, next) => {
+    const wantsHtml = (req.headers.accept || "").includes("text/html");
+    const isApi = req.path.startsWith("/api/");
+    const looksLikeAsset = req.path.includes(".");
+    if (req.method !== "GET" || isApi || looksLikeAsset || !wantsHtml) {
+      return next();
+    }
+    res.sendFile(path.join(staticDir!, "index.html"));
   });
 } else {
-  // Fallback if frontend hasn’t been built yet
+  // Helpful message if the build isn't found
   app.get("*", (_req, res) => {
     res
       .status(200)
       .send(
-        "Frontend not built yet. Run `vite build` so dist/index.html exists."
+        "Frontend build not found. Run `vite build` (or `cd client && vite build`) so dist/index.html and dist/assets/ exist."
       );
   });
 }
